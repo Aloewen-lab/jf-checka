@@ -1,0 +1,69 @@
+# JP-Flightwatch — Konfiguration
+# Alle Preise in EUR. Alle *_eur-Schwellwerte sind GRUPPEN-GESAMTPREISE für 5 Personen.
+
+group_size: 5
+
+# Passagier-Konfigurationen, die gesucht werden.
+# "5" = alle zusammen (Primärmessung). "3"/"2" = Split-Kontrolle.
+# Gruppenpreis = min(p5, p3 + p2)
+passenger_configs:
+  primary: 5
+  split: [3, 2]
+
+route:
+  origin: BER
+  # Google-Knowledge-Graph-Code der Stadt, deckt HND + NRT in einem Call ab.
+  # ACHTUNG: "TYO" funktioniert bei dieser API nicht.
+  destination: /m/07dfk
+  destination_label: Tokio (HND + NRT)
+  travel_class: 1 # 1 = Economy
+
+# Osterferien Berlin 2027: 22.03.-02.04. Hier die einrahmenden Wochenenden.
+dates:
+  outbound: ["2027-03-19", "2027-03-20", "2027-03-21", "2027-03-22"]
+  inbound: ["2027-04-02", "2027-04-03", "2027-04-04", "2027-04-05"]
+  # Datumspaare mit täglicher Messung. Der Rest des Gitters läuft seltener.
+  core:
+    - ["2027-03-20", "2027-04-03"] # Sa -> Sa, 14 Nächte
+    - ["2027-03-21", "2027-04-04"] # So -> So, 14 Nächte
+    - ["2027-03-19", "2027-04-03"] # Fr -> Sa, 15 Nächte
+    - ["2027-03-20", "2027-04-04"] # Sa -> So, 15 Nächte
+
+# Variante A (Free-Tier, 250 Calls/Monat) -> ~242 Calls.
+# Für Variante B ($25/Monat) einfach alle *_every_n_days auf 1 setzen.
+cadence:
+  core_primary_every_n_days: 1
+  fringe_primary_every_n_days: 4
+  split_check_every_n_days: 7
+  # Zusätzlicher Split-Check, wenn der 5er-Preis gegenüber der letzten Messung
+  # um mehr als diesen Prozentsatz steigt (Bucket vermutlich ausgelaufen).
+  split_check_on_jump_pct: 10
+
+quota:
+  monthly_limit: 250
+  # Unterhalb dieser Reserve werden nur noch Kern-Paare gemessen.
+  reserve_calls: 20
+  # Priorität bei knappem Kontingent
+  priority: [core, split_trigger, fringe]
+
+alerts:
+  cooldown_hours: 12
+  digest_hour_local: 8 # Tages-Digest um 08:00 Europe/Berlin
+
+recipients:
+  - email: person.a@example.com
+    rules:
+      absolute_below_eur: 6500 # ~1.300 EUR p. P.
+      relative_drop_pct: 10 # <= 90 % des 7-Tage-Medians
+      new_all_time_low: true
+    filters:
+      max_stops: 2
+    digest: true
+  # Weitere Empfänger nach dem gleichen Muster ergänzen.
+  # - email: person.b@example.com
+  #   rules:
+  #     absolute_below_eur: 6000
+  #   filters:
+  #     max_stops: 1
+  #     max_duration_h: 18
+  #   digest: false
