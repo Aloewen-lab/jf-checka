@@ -89,9 +89,32 @@ class Snapshot:
 
 
 @dataclass
+class PricePoint:
+    """Ein Punkt aus Googles eigenem Preisgraph (`price_insights.price_history`).
+
+    Google liefert das Feld nur für Termine, die nah genug sind — für Ostern 2027
+    (Stand Juli 2026) noch nicht. Wir speichern es trotzdem ab, sobald es
+    auftaucht: es kostet keinen zusätzlichen Call und liefert rückwirkend rund
+    zwei Monate Historie, die sich sonst nicht rekonstruieren lässt.
+    """
+
+    ts_utc: str  # Zeitpunkt unserer Messung
+    provider: str
+    outbound_date: str
+    return_date: str
+    adults: int
+    hist_date: str  # Tag, für den Google diesen Preis ausweist
+    price_eur: float
+
+    def as_row(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class SearchResult:
     snapshot: Snapshot
     offers: list[Offer] = field(default_factory=list)
+    price_history: list[PricePoint] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:

@@ -24,7 +24,7 @@ import yaml
 from dotenv import load_dotenv
 
 import store
-from models import Offer, SearchRequest, Snapshot
+from models import Offer, PricePoint, SearchRequest, Snapshot
 from providers import SerpApiProvider
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -76,7 +76,9 @@ def build_plan(cfg: dict, state: dict, today: date, force: bool) -> dict[str, li
     cores = core_pairs(cfg)
     fringe = [p for p in all_pairs(cfg) if p not in cores]
 
-    plan: dict[str, list[SearchRequest]] = {"core": [], "fringe": [], "split_scheduled": []}
+    plan: dict[str, list[SearchRequest]] = {
+        "core": [], "fringe": [], "split_scheduled": [], "reference": []
+    }
 
     for pair in cores:
         req = make_request(cfg, pair, primary)
@@ -93,6 +95,14 @@ def build_plan(cfg: dict, state: dict, today: date, force: bool) -> dict[str, li
             req = make_request(cfg, pair, adults)
             if is_due(state, req.key, cad["split_check_every_n_days"], today, force):
                 plan["split_scheduled"].append(req)
+
+    ref = cfg.get("reference_history") or {}
+    if ref.get("enabled"):
+        plan["reference"] = []
+        for pair in ref.get("pairs", []):
+            req = make_request(cfg, tuple(pair), ref.get("adults", 1))
+            if is_due(state, req.key, ref.get("every_n_days", 7), today, force):
+                plan["reference"].append(req)
 
     return plan
 
@@ -139,6 +149,7 @@ def run_batch(
     label: str,
     offers: list[Offer],
     snapshots: list[Snapshot],
+    history: list[PricePoint],
     state: dict,
     today: date,
 ) -> None:
@@ -150,6 +161,7 @@ def run_batch(
         budget.spend(result.snapshot.api_calls)
         snapshots.append(result.snapshot)
         offers.extend(result.offers)
+        history.extend(result.price_history)
 
         if result.snapshot.status != "error":
             state.setdefault("last_checked", {})[req.key] = today.isoformat()
@@ -274,7 +286,7 @@ def main() -> int:
     plan = build_plan(cfg, state, today, args.force_all)
     planned = sum(len(v) for v in plan.values())
     print(f"== Plan für {today} ==")
-    for label in ("core", "fringe", "split_scheduled"):
+    for label in ("core", "fringe", "split_scheduled", "reference"):
         print(f"  {label:<16} {len(plan[label]):>3} Anfragen")
     print(f"  {'gesamt':<16} {planned:>3}")
 
@@ -298,20 +310,27 @@ def main() -> int:
     snapshots_before = store.read_snapshots()
     offers: list[Offer] = []
     snapshots: list[Snapshot] = []
+    history: list[PricePoint] = []
+
+    def batch(reqs: list[SearchRequest], label: str) -> None:
+        run_batch(
+            provider, reqs, budget, label, offers, snapshots, history, state, today
+        )
 
     print("\n== Messung ==")
-    run_batch(provider, plan["core"], budget, "core", offers, snapshots, state, today)
+    batch(plan["core"], "core")
 
     triggers = detect_split_triggers(cfg, snapshots_before, list(snapshots))
     if triggers:
-        run_batch(provider, triggers, budget, "trigger", offers, snapshots, state, today)
+        batch(triggers, "trigger")
 
-    run_batch(provider, plan["fringe"], budget, "fringe", offers, snapshots, state, today)
-    run_batch(
-        provider, plan["split_scheduled"], budget, "split", offers, snapshots, state, today
-    )
+    batch(plan["fringe"], "fringe")
+    batch(plan["split_scheduled"], "split")
+    # Zuletzt, weil es reiner Kontext ist: liefert Googles Preisgraph für einen
+    # nahen Referenztermin auf derselben Route.
+    batch(plan["reference"], "refhist")
 
-    written = store.write_run(offers, snapshots)
+    written = store.write_run(offers, snapshots, history)
     store.save_state(state)
 
     ok = sum(1 for s in snapshots if s.status == "ok")
@@ -319,6 +338,8 @@ def main() -> int:
         f"\n== Ergebnis ==\n  {budget.used} Calls verbraucht, "
         f"{ok}/{len(snapshots)} Messungen erfolgreich, {len(offers)} Angebote gespeichert"
     )
+    if history:
+        print(f"  {len(history)} Punkte aus Googles Preisgraph mitgespeichert")
     for kind, path in written.items():
         if path:
             print(f"  {kind}: {path.relative_to(ROOT)}")

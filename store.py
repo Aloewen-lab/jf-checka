@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from models import Offer, Snapshot
+from models import Offer, PricePoint, Snapshot
 
 BASE = pathlib.Path(__file__).resolve().parent / "data"
 OFFERS_DIR = BASE / "offers"
 SNAPSHOTS_DIR = BASE / "snapshots"
+HISTORY_DIR = BASE / "price_history"
 STATE_FILE = BASE / "collector_state.json"
 
 OFFER_DTYPES: dict[str, str] = {
@@ -65,6 +66,16 @@ SNAPSHOT_DTYPES: dict[str, str] = {
     "api_calls": "int16",
 }
 
+HISTORY_DTYPES: dict[str, str] = {
+    "ts_utc": "string",
+    "provider": "string",
+    "outbound_date": "string",
+    "return_date": "string",
+    "adults": "int16",
+    "hist_date": "string",
+    "price_eur": "float64",
+}
+
 
 def _coerce(rows: list[dict], dtypes: dict[str, str]) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=list(dtypes))
@@ -87,31 +98,33 @@ def _read_dir(directory: pathlib.Path, dtypes: dict[str, str]) -> pd.DataFrame:
 
 
 def write_run(
-    offers: list[Offer], snapshots: list[Snapshot], run_id: str | None = None
+    offers: list[Offer],
+    snapshots: list[Snapshot],
+    history: list[PricePoint] | None = None,
+    run_id: str | None = None,
 ) -> dict[str, pathlib.Path | None]:
     now = datetime.now(timezone.utc)
     day = now.strftime("%Y-%m-%d")
     run_id = run_id or now.strftime("%H%M%S")
 
-    written: dict[str, pathlib.Path | None] = {"offers": None, "snapshots": None}
+    written: dict[str, pathlib.Path | None] = {
+        "offers": None, "snapshots": None, "price_history": None
+    }
 
-    if offers:
-        target = OFFERS_DIR / f"dt={day}"
+    for kind, rows, directory, dtypes in (
+        ("offers", offers, OFFERS_DIR, OFFER_DTYPES),
+        ("snapshots", snapshots, SNAPSHOTS_DIR, SNAPSHOT_DTYPES),
+        ("price_history", history or [], HISTORY_DIR, HISTORY_DTYPES),
+    ):
+        if not rows:
+            continue
+        target = directory / f"dt={day}"
         target.mkdir(parents=True, exist_ok=True)
-        path = target / f"offers-{run_id}.parquet"
-        _coerce([o.as_row() for o in offers], OFFER_DTYPES).to_parquet(
+        path = target / f"{kind}-{run_id}.parquet"
+        _coerce([r.as_row() for r in rows], dtypes).to_parquet(
             path, index=False, compression="snappy"
         )
-        written["offers"] = path
-
-    if snapshots:
-        target = SNAPSHOTS_DIR / f"dt={day}"
-        target.mkdir(parents=True, exist_ok=True)
-        path = target / f"snapshots-{run_id}.parquet"
-        _coerce([s.as_row() for s in snapshots], SNAPSHOT_DTYPES).to_parquet(
-            path, index=False, compression="snappy"
-        )
-        written["snapshots"] = path
+        written[kind] = path
 
     return written
 
@@ -125,6 +138,12 @@ def read_offers() -> pd.DataFrame:
 
 def read_snapshots() -> pd.DataFrame:
     return _read_dir(SNAPSHOTS_DIR, SNAPSHOT_DTYPES)
+
+
+def read_price_history() -> pd.DataFrame:
+    """Googles eigener Preisgraph, soweit geliefert. Für Ostern 2027 aktuell leer —
+    Google baut die Reihe erst, wenn der Termin näher rückt."""
+    return _read_dir(HISTORY_DIR, HISTORY_DTYPES)
 
 
 def last_known_min_price(

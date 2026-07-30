@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from models import Offer, SearchRequest, SearchResult, Snapshot
+from models import Offer, PricePoint, SearchRequest, SearchResult, Snapshot
 
 ENDPOINT = "https://serpapi.com/search"
 ACCOUNT_ENDPOINT = "https://serpapi.com/account"
@@ -90,6 +90,7 @@ class SerpApiProvider:
         insights = payload.get("price_insights") or {}
         typical = insights.get("typical_price_range") or [None, None]
         prices = [o.price_eur for o in offers]
+        history = self._parse_history(ts, req, insights.get("price_history"))
 
         snap = self._snapshot(
             ts,
@@ -102,7 +103,34 @@ class SerpApiProvider:
             typical_high_eur=typical[1],
             api_calls=calls,
         )
-        return SearchResult(snap, offers)
+        return SearchResult(snap, offers, history)
+
+    @staticmethod
+    def _parse_history(ts: str, req: SearchRequest, raw: object) -> list[PricePoint]:
+        """`price_history` ist eine Liste [unix_timestamp, preis]."""
+        if not isinstance(raw, list):
+            return []
+        points: list[PricePoint] = []
+        for entry in raw:
+            if not (isinstance(entry, (list, tuple)) and len(entry) == 2):
+                continue
+            stamp, price = entry
+            try:
+                day = datetime.fromtimestamp(int(stamp), timezone.utc).date().isoformat()
+            except (TypeError, ValueError, OSError):
+                continue
+            points.append(
+                PricePoint(
+                    ts_utc=ts,
+                    provider=SerpApiProvider.name,
+                    outbound_date=req.outbound_date,
+                    return_date=req.return_date,
+                    adults=req.adults,
+                    hist_date=day,
+                    price_eur=float(price),
+                )
+            )
+        return points
 
     # ---------------------------------------------------------------- interna
 

@@ -10,12 +10,17 @@ passenger_configs:
   primary: 5
   split: [3, 2]
 
+# Unter dieser Ersparnis wird die Aufteilung nicht empfohlen: zwei getrennte
+# Buchungen bedeuten getrennte Umbuchung und ggf. auseinanderliegende Sitze —
+# das ist ein paar Euro Preisvorteil nicht wert.
+split_min_saving_eur: 50
+
 route:
   origin: BER
   # Google-Knowledge-Graph-Code der Stadt, deckt HND + NRT in einem Call ab.
   # ACHTUNG: "TYO" funktioniert bei dieser API nicht.
   destination: /m/07dfk
-  destination_label: Tokio (HND + NRT)
+  destination_label: Tokio — Haneda (HND) + Narita (NRT)
   travel_class: 1 # 1 = Economy
 
 # Osterferien Berlin 2027: 22.03.-02.04. Hier die einrahmenden Wochenenden.
@@ -38,6 +43,18 @@ cadence:
   # Zusätzlicher Split-Check, wenn der 5er-Preis gegenüber der letzten Messung
   # um mehr als diesen Prozentsatz steigt (Bucket vermutlich ausgelaufen).
   split_check_on_jump_pct: 10
+
+# Googles eigener Preisgraph (rund 2 Monate Rückschau) existiert nur für nähere
+# Termine — für Ostern 2027 liefert die API ihn nicht. Über einen Referenztermin
+# auf derselben Route bekommen wir ihn trotzdem: das ergibt ein Routen-Preisniveau
+# als Kontext, NICHT die Ostern-Preise. adults muss 1 sein, für 5 Passagiere
+# liefert Google keine price_insights.
+reference_history:
+  enabled: true
+  every_n_days: 7
+  adults: 1
+  pairs:
+    - ["2026-09-19", "2026-10-03"] # 14 Nächte, ~8 Wochen Vorlauf
 
 quota:
   monthly_limit: 250

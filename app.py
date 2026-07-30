@@ -37,8 +37,10 @@ SEQ_BLUE = [
 
 ROOT = store.BASE.parent
 
+APP_NAME = "JF-Checka"
+
 st.set_page_config(
-    page_title="JP-Flightwatch — BER → Tokio, Ostern 2027",
+    page_title=f"{APP_NAME} — BER → Tokio, Ostern 2027",
     page_icon="🛫",
     layout="wide",
 )
@@ -48,16 +50,37 @@ st.set_page_config(
 
 
 @st.cache_data(ttl=300)
-def load() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
-    return store.read_offers(), store.read_snapshots(), cfg
+    return (
+        store.read_offers(),
+        store.read_snapshots(),
+        store.read_price_history(),
+        cfg,
+    )
 
 
-offers_all, snapshots, cfg = load()
+offers_all, snapshots, google_history, cfg = load()
 group_size = cfg["group_size"]
 
+# Der Referenztermin (siehe reference_history in config.yaml) liegt in 2026 und
+# darf die Ostern-Auswertung nicht verfälschen — er dient nur dazu, Googles
+# Preisgraph abzuholen. Deshalb hart auf das konfigurierte Fenster einschränken.
+_win_out = set(cfg["dates"]["outbound"])
+_win_in = set(cfg["dates"]["inbound"])
+
+
+def _in_window(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df[df["outbound_date"].isin(_win_out) & df["return_date"].isin(_win_in)]
+
+
+offers_all = _in_window(offers_all)
+snapshots = _in_window(snapshots)
+
 if offers_all.empty:
-    st.title("JP-Flightwatch")
+    st.title(APP_NAME)
     st.warning("Noch keine Daten. Erst `python collect.py` ausführen.")
     st.stop()
 
@@ -77,8 +100,23 @@ max_stops = st.sidebar.select_slider(
 )
 dur_max = int(offers_all["duration_out_min"].max() // 60) + 1
 max_duration_h = st.sidebar.slider("Max. Reisedauer (h)", 8, dur_max, dur_max)
+AIRPORT_NAMES = {
+    "HND": "HND — Tokio Haneda (stadtnah)",
+    "NRT": "NRT — Tokio Narita (~60 km östlich)",
+    "KIX": "KIX — Osaka Kansai",
+    "NGO": "NGO — Nagoya Chubu",
+    "FUK": "FUK — Fukuoka",
+    "CTS": "CTS — Sapporo New Chitose",
+}
 airports = sorted(offers_all["arrival_airport"].dropna().unique().tolist())
-arrival = st.sidebar.multiselect("Ankunft", airports, default=airports)
+arrival = st.sidebar.multiselect(
+    "Ankunftsflughafen",
+    airports,
+    default=airports,
+    format_func=lambda a: AIRPORT_NAMES.get(a, a),
+    help="Haneda liegt deutlich näher an der Stadt als Narita — bei gleichem "
+    "Preis ist HND meist die bessere Wahl.",
+)
 
 all_nights = sorted(
     {
@@ -140,7 +178,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("BER → Tokio · Osterferien 2027")
+st.title(APP_NAME)
+st.markdown("**BER → Tokio · Osterferien 2027**")
 st.caption(
     f"{cfg['route']['destination_label']} · {group_size} Reisende · Economy · "
     f"Hinflug {min(cfg['dates']['outbound'])}–{max(cfg['dates']['outbound'])}, "
@@ -214,8 +253,9 @@ st.markdown(f'<div class="kpi-row">{"".join(cards)}</div>', unsafe_allow_html=Tr
 latest_day = group_df["day"].max()
 today_rows = group_df[group_df["day"] == latest_day]
 best_row = today_rows.loc[today_rows["group_price"].idxmin()]
+MIN_SPLIT_SAVING = float(cfg.get("split_min_saving_eur", 0))
 saving = best_row["split_saving"]
-if pd.notna(saving) and saving > 0:
+if pd.notna(saving) and saving >= MIN_SPLIT_SAVING:
     est = " (Split-Preis fortgeschrieben)" if best_row["split_estimated"] else ""
     st.success(
         f"**Getrennt buchen spart {saving / unit_divisor:,.0f} {unit_label}** "
@@ -228,8 +268,8 @@ if pd.notna(saving) and saving > 0:
 
 # --------------------------------------------------------------------- Tabs
 
-tab_trend, tab_grid, tab_table = st.tabs(
-    ["Preisverlauf", "Fare-Grid", "Aktuelle Angebote"]
+tab_trend, tab_grid, tab_split, tab_table = st.tabs(
+    ["Preisverlauf", "Fare-Grid", "Zusammen vs. 3+2", "Aktuelle Angebote"]
 )
 
 
@@ -262,19 +302,22 @@ with tab_trend:
     d = daily.copy()
     d["value"] = d["group_price"] / unit_divisor
     d["median"] = analytics.rolling_median(daily).values / unit_divisor
+    # Echte Zeitachse statt Kategorien: nur so werden ausgefallene Messtage als
+    # Lücke sichtbar und nicht stillschweigend zusammengeschoben.
+    d["x"] = pd.to_datetime(d["day"])
 
     fig = go.Figure()
     if len(d) >= 3:
         fig.add_trace(
             go.Scatter(
-                x=d["day"], y=d["median"], name="7-Tage-Median",
+                x=d["x"], y=d["median"], name="7-Tage-Median",
                 mode="lines", line=dict(color=TEXT_MUTED, width=2, dash="dot"),
                 hovertemplate="%{y:,.0f}<extra>7-Tage-Median</extra>",
             )
         )
     fig.add_trace(
         go.Scatter(
-            x=d["day"], y=d["value"], name="Günstigster Gruppenpreis",
+            x=d["x"], y=d["value"], name="Günstigster Gruppenpreis",
             mode="lines+markers",
             line=dict(color=SERIES_1, width=2),
             marker=dict(size=9, color=SERIES_1, line=dict(width=2, color=SURFACE)),
@@ -288,7 +331,7 @@ with tab_trend:
     # Allzeit-Tief direkt beschriften statt eine Zahl an jeden Punkt zu hängen.
     if k.all_time_low is not None:
         fig.add_annotation(
-            x=k.all_time_low_day, y=k.all_time_low / unit_divisor,
+            x=pd.Timestamp(k.all_time_low_day), y=k.all_time_low / unit_divisor,
             text=f"Tief {fmt(k.all_time_low)}", showarrow=True, arrowhead=0,
             arrowcolor=TEXT_MUTED, ax=0, ay=-30,
             font=dict(color=TEXT_PRIMARY, size=12), bgcolor=SURFACE,
@@ -296,11 +339,63 @@ with tab_trend:
         )
     fig.update_layout(title=f"Preisniveau seit Tracking-Start ({unit_label})")
     fig = base_layout(fig, unit_label)
+    fig.update_xaxes(type="date", tickformat="%d.%m.", ticklabelmode="period")
+    if len(d) <= 14:
+        fig.update_xaxes(dtick=86_400_000)  # täglich, sonst erfindet Plotly Uhrzeiten
     if len(d) < 3:
-        # Bei einem einzigen Punkt wählt Plotly eine entartete Achse (7231–7231).
+        # Bei einem einzigen Punkt wählt Plotly sonst eine entartete Achse
+        # (7231–7231 auf der y-, Mikrosekunden auf der x-Achse).
         v = float(d["value"].iloc[0])
         fig.update_yaxes(range=[v * 0.94, v * 1.06])
+        mid = d["x"].iloc[0]
+        fig.update_xaxes(
+            range=[mid - pd.Timedelta(days=3), mid + pd.Timedelta(days=3)]
+        )
     st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        "Für die Ostern-2027-Termine selbst gibt es keine Rückschau: Googles Preisgraph "
+        "entsteht erst, wenn ein Termin näher rückt. Der Collector speichert ihn "
+        "automatisch, sobald er für diese Daten auftaucht."
+    )
+
+    # --- Routen-Preisniveau als Kontext ------------------------------------
+    if not google_history.empty:
+        ref = google_history.copy()
+        newest = ref["ts_utc"].max()
+        ref = ref[ref["ts_utc"] == newest]
+        ref["pro_person"] = ref["price_eur"] / ref["adults"]
+        ref["x"] = pd.to_datetime(ref["hist_date"])
+        ref = ref.sort_values("x")
+        ref_pair = f"{ref['outbound_date'].iloc[0]} → {ref['return_date'].iloc[0]}"
+
+        st.markdown("---")
+        st.markdown("**Routen-Preisniveau BER → Tokio (Googles Rückschau)**")
+
+        hist_fig = go.Figure(
+            go.Scatter(
+                x=ref["x"], y=ref["pro_person"], mode="lines",
+                line=dict(color=SERIES_1, width=2),
+                name="Günstigster Preis pro Person",
+                hovertemplate="%{x|%d.%m.%Y}<br><b>%{y:,.0f} €</b> p. P.<extra></extra>",
+            )
+        )
+        hist_fig.update_layout(
+            title=f"Referenztermin {ref_pair} · 1 Person · {len(ref)} Tage",
+        )
+        st.plotly_chart(base_layout(hist_fig, "€ pro Person"), use_container_width=True)
+
+        first, last = float(ref["pro_person"].iloc[0]), float(ref["pro_person"].iloc[-1])
+        trend = "gestiegen" if last > first else "gefallen"
+        st.caption(
+            f"**Das sind nicht die Ostern-Preise.** Diese Reihe zeigt einen "
+            f"Referenztermin im Herbst 2026, für den Google eine Historie führt — "
+            f"gedacht als Kontext für das allgemeine Preisniveau der Strecke. "
+            f"Im gezeigten Zeitraum ist es von {first:,.0f} € auf {last:,.0f} € "
+            f"pro Person {trend}. Saisonal ist Ostern nicht mit dem Herbst "
+            f"vergleichbar, die Reihe taugt also für den Trend der Strecke, "
+            f"nicht als Prognose für unsere Termine.".replace(",", ".")
+        )
 
     with st.expander("Datenreihe als Tabelle"):
         show = daily.copy()
@@ -367,9 +462,141 @@ with tab_grid:
     )
     st.plotly_chart(hm, use_container_width=True)
     st.caption(
-        "Kurze Reisen sind hier systematisch günstiger — über den Nächte-Filter "
-        "links vergleichbar machen."
+        "Jede Zelle zeigt den **besseren der beiden Buchungswege** — alle zusammen "
+        "oder 3+2 getrennt. Welcher das ist, steht im Tab „Zusammen vs. 3+2“. "
+        "Kurze Reisen sind hier systematisch günstiger; über den Nächte-Filter links "
+        "vergleichbar machen."
     )
+
+
+with tab_split:
+    st.markdown(
+        f"**Alle {group_size} zusammen buchen oder in 3 + 2 aufteilen?** "
+        f"Stand {latest_day}, {unit_label}."
+    )
+
+    cmp_df = today_rows.dropna(subset=["p_all", "p_split"]).copy()
+    if cmp_df.empty:
+        st.info(
+            "Für kein Datumspaar liegen beide Messungen vor. Der Split-Check läuft "
+            f"alle {cfg['cadence']['split_check_every_n_days']} Tage auf den Kern-Paaren "
+            f"und zusätzlich sofort, wenn ein Preis um mehr als "
+            f"{cfg['cadence']['split_check_on_jump_pct']} % springt."
+        )
+    else:
+        cmp_df["pair"] = cmp_df["outbound_date"] + " → " + cmp_df["return_date"]
+        cmp_df = cmp_df.sort_values("group_price")
+
+        # Dot-Plot statt Balken: der Abstand zwischen den Punkten IST die Aussage.
+        # Balken bräuchten eine Nullachse, auf der 390 EUR von 7.620 EUR
+        # verschwinden; ein Punktdiagramm darf legitim zoomen.
+        p_all_v = cmp_df["p_all"] / unit_divisor
+        p_split_v = cmp_df["p_split"] / unit_divisor
+
+        conn_x: list[float | None] = []
+        conn_y: list[str | None] = []
+        for pair, a_val, b_val in zip(cmp_df["pair"], p_all_v, p_split_v):
+            conn_x += [a_val, b_val, None]
+            conn_y += [pair, pair, None]
+
+        dots = go.Figure()
+        dots.add_trace(
+            go.Scatter(
+                x=conn_x, y=conn_y, mode="lines",
+                line=dict(color=GRID, width=3),
+                showlegend=False, hoverinfo="skip",
+            )
+        )
+        dots.add_trace(
+            go.Scatter(
+                x=p_all_v, y=cmp_df["pair"], mode="markers",
+                name=f"Alle {group_size} zusammen",
+                marker=dict(size=13, color=SERIES_1, line=dict(width=2, color=SURFACE)),
+                hovertemplate="%{x:,.0f}<extra>zusammen</extra>",
+            )
+        )
+        dots.add_trace(
+            go.Scatter(
+                x=p_split_v, y=cmp_df["pair"], mode="markers",
+                name="3 + 2 getrennt",
+                marker=dict(size=13, color=SERIES_2, line=dict(width=2, color=SURFACE)),
+                hovertemplate="%{x:,.0f}<extra>3 + 2</extra>",
+            )
+        )
+        for pair, saving, b_val in zip(
+            cmp_df["pair"], cmp_df["split_saving"] / unit_divisor, p_split_v
+        ):
+            if saving and saving > 0:
+                dots.add_annotation(
+                    x=b_val, y=pair, text=f"−{saving:,.0f} €".replace(",", "."),
+                    showarrow=False, xanchor="right", xshift=-14,
+                    font=dict(color=TEXT_PRIMARY, size=12),
+                )
+
+        lo_x = float(min(p_all_v.min(), p_split_v.min()))
+        hi_x = float(max(p_all_v.max(), p_split_v.max()))
+        pad = max((hi_x - lo_x) * 0.35, hi_x * 0.01)
+        dots.update_layout(
+            paper_bgcolor=SURFACE, plot_bgcolor=SURFACE, separators=",.",
+            font=dict(color=TEXT_SECONDARY, size=13),
+            margin=dict(l=8, r=8, t=52, b=8), height=90 + 62 * len(cmp_df),
+            legend=dict(orientation="h", yanchor="bottom", y=1.04, x=0),
+            hoverlabel=dict(bgcolor=SURFACE, bordercolor=GRID, font_color=TEXT_PRIMARY),
+            xaxis=dict(
+                title=f"{unit_label} — weiter links ist günstiger",
+                gridcolor=GRID, zeroline=False, linecolor=GRID,
+                tickformat=",.0f", range=[lo_x - pad, hi_x + pad * 0.4],
+            ),
+            yaxis=dict(
+                type="category", showgrid=False, linecolor=SURFACE,
+                autorange="reversed", ticks="",
+            ),
+        )
+        st.plotly_chart(dots, use_container_width=True)
+        st.caption(
+            "Die Achse beginnt nicht bei 0 — sie ist auf den Preisbereich gezoomt, "
+            "damit kleine Unterschiede sichtbar werden. Liegen zwei Punkte "
+            "übereinander, bringt die Aufteilung an diesem Termin nichts."
+        )
+
+        table = cmp_df.copy()
+        table["Ersparnis"] = table["split_saving"] / unit_divisor
+        table["Empfehlung"] = [
+            "3 + 2 getrennt" if s > 0 else "zusammen" for s in table["split_saving"]
+        ]
+        table["Split geschätzt"] = table["split_estimated"].map({True: "ja", False: "nein"})
+        for col, src in (
+            ("Alle zusammen", "p_all"), ("3er-Buchung", "p_a"),
+            ("2er-Buchung", "p_b"), ("Summe 3+2", "p_split"),
+        ):
+            table[col] = table[src] / unit_divisor
+
+        st.dataframe(
+            table[
+                ["pair", "nights", "Alle zusammen", "3er-Buchung", "2er-Buchung",
+                 "Summe 3+2", "Ersparnis", "Empfehlung", "Split geschätzt"]
+            ].rename(columns={"pair": "Datumspaar", "nights": "Nächte"}),
+            hide_index=True, use_container_width=True,
+            column_config={
+                c: st.column_config.NumberColumn(format="%.0f €")
+                for c in ("Alle zusammen", "3er-Buchung", "2er-Buchung",
+                          "Summe 3+2", "Ersparnis")
+            },
+        )
+        st.caption(
+            "**Warum das überhaupt etwas bringt:** Airlines verkaufen in Fare-Buckets mit "
+            "begrenzter Sitzzahl. Eine Suche für 5 Personen zeigt nur Angebote, bei denen "
+            "alle 5 Plätze im selben Bucket frei sind — sind es nur noch 3, fällt der "
+            "billige Preis aus dem Ergebnis. Zwei getrennte Buchungen können ihn wieder "
+            "erreichen. Preis dafür: kein gemeinsames Ticket, getrennte Umbuchung, "
+            "Sitzplätze ggf. auseinander."
+        )
+        missing = len(today_rows) - len(cmp_df)
+        if missing:
+            st.caption(
+                f"Für {missing} weitere Datumspaare fehlt noch die Split-Messung — "
+                "dort steht im Fare-Grid der Preis für alle zusammen."
+            )
 
 
 with tab_table:
