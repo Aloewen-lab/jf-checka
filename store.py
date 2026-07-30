@@ -91,20 +91,17 @@ def _read_dir(directory: pathlib.Path, dtypes: dict[str, str]) -> pd.DataFrame:
     frames = [pd.read_parquet(f) for f in files]
     df = pd.concat(frames, ignore_index=True)
     # Vorwärtskompatibilität: Altbestand vor einer Schema-Erweiterung bekommt
-    # Default-Werte (bags=0 heißt: gemessen ohne Gepäck-Parameter). Zwei Fälle:
-    # die Spalte fehlt komplett (nur alte Dateien) ODER sie ist nach dem concat
-    # von alten und neuen Dateien teilweise NaN — genau dieser Mischfall hat am
-    # 30.07.2026 zwei Actions-Läufe crashen lassen (IntCastingNaNError), weil
-    # ein fillna fehlte und NaN nicht in int16 passt.
-    defaults = {"bags": 0}
-    for col, default in defaults.items():
-        if col not in df.columns:
-            df[col] = default
-        else:
-            df[col] = df[col].fillna(default)
-    for col in dtypes:
+    # Default-Werte (bags=0 heißt: gemessen ohne Gepäck-Parameter). Der Mischfall
+    # alt+neu hat am 30.07.2026 zwei Actions-Läufe und die Cloud-App crashen
+    # lassen (IntCastingNaNError: NaN passt nicht in int16). Deshalb hier
+    # generisch: JEDE Integer-Spalte wird vor dem astype über to_numeric
+    # gezogen und NaN mit 0 gefüllt — unabhängig von pandas-Version und davon,
+    # welche Spalte künftig dazukommt.
+    for col, dtype in dtypes.items():
         if col not in df.columns:
             df[col] = pd.NA
+        if dtype.startswith(("int", "Int")):
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     return df[list(dtypes)].astype(dtypes)
 
 

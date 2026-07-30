@@ -39,6 +39,8 @@ SEQ_BLUE = [
 ROOT = store.BASE.parent
 
 APP_NAME = "JF-Checka"
+# Sichtbar im Footer. Bei Deploy-Problemen sofort erkennbar, welcher Stand läuft.
+BUILD = "2026-07-30.4"
 
 st.set_page_config(
     page_title=f"{APP_NAME} — BER → Tokio, Ostern 2027",
@@ -676,7 +678,7 @@ with tab_table:
 
 health = analytics.data_health(snapshots)
 cols = st.columns([2, 1, 1])
-cols[0].caption(f"Letzte Messung: {health['last_run']} UTC")
+cols[0].caption(f"Letzte Messung: {health['last_run']} UTC · Build {BUILD}")
 cols[1].caption(f"Erfolgreiche Messungen: {health['n_ok']}")
 if health["n_failed"]:
     cols[2].error(f"{health['n_failed']} fehlgeschlagen: {health['errors'][:1]}")
