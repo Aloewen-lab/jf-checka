@@ -65,6 +65,8 @@ class SerpApiProvider:
             "hl": "de",
             "gl": "de",
         }
+        if req.bags:
+            params["bags"] = str(req.bags)
 
         payload, error, calls = self._get_with_retry(params)
 
@@ -178,6 +180,7 @@ class SerpApiProvider:
             outbound_date=req.outbound_date,
             return_date=req.return_date,
             adults=req.adults,
+            bags=req.bags,
             price_eur=float(price),
             price_per_person_eur=round(float(price) / req.adults, 2),
             bucket=bucket,
@@ -220,6 +223,7 @@ class SerpApiProvider:
             outbound_date=req.outbound_date,
             return_date=req.return_date,
             adults=req.adults,
+            bags=req.bags,
             status=status,
             n_offers=n_offers,
             price_min_eur=price_min_eur,

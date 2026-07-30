@@ -22,6 +22,19 @@ route:
   destination: /m/07dfk
   destination_label: Tokio — Haneda (HND) + Narita (NRT)
   travel_class: 1 # 1 = Economy
+  # Gepäckstücke pro Person in der Suche. Seit 30.07.2026 (nachmittags) = 1: getrackt wird,
+  # was 5 Personen mit Koffern zahlen — Light-Tarife ohne Gepäck werden von
+  # Google herausgefiltert bzw. umbepreist, soweit Gebühren bekannt sind.
+  # Tag-1-Messungen (30.07.) liefen ohne diesen Parameter (bags=0 im Schema).
+  bags_per_person: 1
+
+# Wöchentlich: Buchungsoptionen des besten Angebots abrufen (2-3 Extra-Calls)
+# und die dort ausgewiesenen Gepäckkonditionen protokollieren. Beantwortet,
+# was im Bestpreis wirklich inkludiert ist — die normale Suchantwort enthält
+# dazu nichts (geprüft: nur CO2-Angaben).
+baggage_audit:
+  enabled: true
+  every_n_days: 7
 
 # Osterferien Berlin 2027: 22.03.-02.04. Hier die einrahmenden Wochenenden.
 dates:

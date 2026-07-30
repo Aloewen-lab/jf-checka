@@ -86,6 +86,30 @@ Daraus folgt die Suchstrategie:
    „Bucket leer", nicht „Airline hat erhöht" — `snapshots` loggt die Angebotsanzahl mit.
 5. **Schwellwerte sind Gruppen-Gesamtpreise**, nicht pro Person. Das Dashboard zeigt beides.
 
+### Gepäck (Entscheidung vom 30.07.2026)
+
+Gepäckregeln sind **nicht standardisiert** — sie hängen an der Fare-Familie der
+jeweiligen Airline. Auf dieser Strecke inkludieren ANA, EVA, Turkish, Qatar und
+SWISS üblicherweise Freigepäck, die Light-Tarife von Condor und Austrian nicht.
+Die normale Suchantwort enthält dazu **keinerlei Information** (geprüft: die
+einzigen "kg"-Angaben sind CO2-Schätzungen).
+
+Konsequenz, zweigleisig:
+
+1. **Alle Suchen laufen mit `bags=1`** (1 Gepäckstück pro Person). Google filtert
+   bzw. bepreist Light-Tarife um, soweit Gebühren bekannt sind. Getrackt wird
+   damit der Preis, den 5 Personen mit Koffern tatsächlich zahlen.
+   **Serienbruch:** die Messungen vom 30.07. vormittags liefen ohne den
+   Parameter (`bags=0` im Schema); `bags` steckt seither im Request-Key, sodass
+   die Kadenz neu ansetzt. Am Umstellungstag mischen sich beide Metriken im
+   Tagesminimum — ab 31.07. ist die Reihe rein.
+2. **Wöchentliches Gepäck-Audit** (`audit.py`, 3 Calls): für das beste Angebot
+   werden die konkreten Buchungsoptionen samt Gepäckkonditionen abgerufen und
+   als JSON gespeichert; Dashboard und Digest zeigen das jüngste Ergebnis.
+   Erster Befund: Austrian/EVA 7.388 € via martiGO = "1 free carry-on;
+   2 free checked bags" pro Person — der aktuelle Bestpreis enthält also
+   bereits großzügiges Freigepäck.
+
 ### Tokio als Stadt statt als Flughafen
 
 `arrival_id=TYO` wird von der API **nicht** akzeptiert (`"Google Flights hasn't returned any

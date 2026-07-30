@@ -29,6 +29,7 @@ import yaml
 from dotenv import load_dotenv
 
 import analytics
+import audit as audit_mod
 import store
 from analytics import Filters, Kpis
 from notify import SmtpConfigError, send
@@ -277,7 +278,8 @@ def render(alert: Alert, cfg: dict) -> tuple[str, str]:
 
     text += [
         "",
-        "Hinweis: Preise ohne Gepäck und Sitzplatzreservierung.",
+        "Hinweis: Preise mit 1 aufgegebenem Gepäckstück pro Person, soweit die",
+        "Airline die Gebühr an Google meldet; Sitzplatzreservierung nicht enthalten.",
         "Dashboard: streamlit run app.py",
     ]
     plain = "\n".join(text)
@@ -423,10 +425,25 @@ def maybe_send_digest(
             f"  {r['outbound_date']} → {r['return_date']}  {int(r['nights'])}N  "
             f"{_eur(float(r['group_price']))}{note}"
         )
+    aud = audit_mod.latest()
+    if aud and aud.get("booking_options"):
+        opt = aud["booking_options"][0]
+        bag = "; ".join(opt.get("baggage") or []) or "keine Gepäckangabe"
+        lines += [
+            "",
+            f"Gepäck-Audit vom {aud['ts_utc'][:10]} "
+            f"({aud['pair']['outbound']} → {aud['pair']['return']}, "
+            f"{aud['itinerary']['airlines']}):",
+            f"  {opt.get('book_with')}: {bag}",
+        ]
+
     lines += [
         "",
         f"Datenlage: {health['n_ok']} erfolgreiche Messungen, "
         f"{health['n_failed']} Fehler · letzte {health['last_run']} UTC",
+        "",
+        "Preise verstehen sich mit 1 aufgegebenem Gepäckstück pro Person,",
+        "soweit die Airline die Gebühr an Google meldet.",
         "",
         "Diese Mail kommt täglich, auch ohne Preisänderung — bleibt sie aus,",
         "läuft der Collector nicht mehr.",

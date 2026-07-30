@@ -127,7 +127,11 @@ gibt es keine Binär-Diffs in Git und die Historie bleibt unveränderlich.
   speichert ihn automatisch, sobald er auftaucht. Als Kontext läuft wöchentlich ein
   Referenztermin auf derselben Strecke mit — das ist das Routen-Preisniveau,
   **nicht** der Ostern-Preis.
-- **Preise ohne Gepäck und Sitzplatzreservierung.**
+- **Gepäck:** gesucht wird mit 1 aufgegebenem Gepäckstück pro Person (`bags=1`,
+  seit 30.07.2026 — davor ohne, `bags`-Spalte im Schema unterscheidet beides).
+  Ob ein konkretes Angebot Freigepäck enthält, verrät nur das wöchentliche
+  Gepäck-Audit (`python audit.py`), nicht die Suchantwort.
+  Sitzplatzreservierung ist nie enthalten.
 - **Die 2er-Messung ist volatil.** Dass 2 Passagiere pro Person günstiger sein
   können als 1, ist ungewöhnlich; ob der Effekt stabil ist, zeigt die Zeitreihe.
 - **Datenquelle ist austauschbar, aber nicht garantiert.** Die Amadeus

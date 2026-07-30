@@ -16,6 +16,7 @@ import streamlit as st
 import yaml
 
 import analytics
+import audit as audit_mod
 import store
 from analytics import Filters
 
@@ -646,8 +647,29 @@ with tab_table:
     st.caption(
         "„Preis (Buchung)“ ist der Gesamtpreis der jeweiligen Buchung für die Anzahl "
         "in der Spalte Pax — eine 2er-Zeile ist also kein Preis für die ganze Gruppe. "
-        "Gepäck und Sitzplatzreservierung sind nicht enthalten."
+        "Seit 30.07.2026 wird mit 1 aufgegebenem Gepäckstück pro Person gesucht "
+        "(`bags=1`); Light-Tarife ohne Koffer werden herausgefiltert oder umbepreist, "
+        "soweit Google die Gebühren kennt. Sitzplatzreservierung nicht enthalten."
     )
+
+    aud = audit_mod.latest()
+    if aud:
+        with st.expander(f"Gepäck-Audit vom {aud['ts_utc'][:10]}"):
+            it = aud["itinerary"]
+            st.markdown(
+                f"Geprüft wurde das günstigste Angebot "
+                f"**{aud['pair']['outbound']} → {aud['pair']['return']}** "
+                f"({it['airlines']}, {it['price_booking']:,.0f} € für "
+                f"{aud['adults']} Personen):".replace(",", ".")
+            )
+            for opt in aud.get("booking_options") or []:
+                bag = "; ".join(opt.get("baggage") or []) or "keine Gepäckangabe"
+                st.markdown(f"- **{opt.get('book_with')}** ({opt.get('price'):,.0f} €): {bag}".replace(",", "."))
+            st.caption(
+                "Gepäckangaben pro Person, direkt aus den Buchungsoptionen. "
+                "Läuft wöchentlich für das jeweils beste Angebot — die normale "
+                "Suchantwort enthält keine Gepäckinformation."
+            )
 
 
 # ------------------------------------------------------------------- Fußzeile

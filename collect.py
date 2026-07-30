@@ -24,6 +24,7 @@ import yaml
 from dotenv import load_dotenv
 
 import alerts
+import audit
 import store
 from models import Offer, PricePoint, SearchRequest, Snapshot
 from notify import SmtpConfigError
@@ -55,6 +56,7 @@ def make_request(cfg: dict, pair: tuple[str, str], adults: int) -> SearchRequest
         return_date=pair[1],
         adults=adults,
         travel_class=cfg["route"].get("travel_class", 1),
+        bags=cfg["route"].get("bags_per_person", 0),
     )
 
 
@@ -332,6 +334,20 @@ def main() -> int:
     # Zuletzt, weil es reiner Kontext ist: liefert Googles Preisgraph für einen
     # nahen Referenztermin auf derselben Route.
     batch(plan["reference"], "refhist")
+
+    # Wöchentliches Gepäck-Audit (3 Calls): Buchungsoptionen des Bestangebots.
+    aud_cfg = cfg.get("baggage_audit") or {}
+    if (
+        aud_cfg.get("enabled")
+        and budget.left >= 3
+        and is_due(
+            state, "baggage_audit", aud_cfg.get("every_n_days", 7), today, args.force_all
+        )
+    ):
+        used, result = audit.run(cfg, api_key)
+        budget.spend(used)
+        if result is not None:
+            state.setdefault("last_checked", {})["baggage_audit"] = today.isoformat()
 
     written = store.write_run(offers, snapshots, history)
     store.save_state(state)

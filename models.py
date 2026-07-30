@@ -16,6 +16,11 @@ class SearchRequest:
     adults: int
     travel_class: int = 1  # 1 = Economy
     currency: str = "EUR"
+    # Gepäckstücke pro Person. Seit 30.07.2026 (nachmittags) Standard 1: getrackt wird der
+    # Preis, den 5 Personen mit Koffern tatsächlich zahlen, nicht der
+    # Light-Tarif, den niemand buchen würde. bags steckt im key, damit der
+    # Metrik-Wechsel eine neue Zeitreihe beginnt statt die alte zu verfälschen.
+    bags: int = 0
 
     @property
     def date_pair(self) -> str:
@@ -24,7 +29,10 @@ class SearchRequest:
     @property
     def key(self) -> str:
         """Stabiler Schlüssel für Kadenz-State und Zeitreihen-Gruppierung."""
-        return f"{self.origin}>{self.destination}|{self.date_pair}|a{self.adults}"
+        return (
+            f"{self.origin}>{self.destination}|{self.date_pair}"
+            f"|a{self.adults}|b{self.bags}"
+        )
 
     @property
     def params_hash(self) -> str:
@@ -41,6 +49,7 @@ class Offer:
     outbound_date: str
     return_date: str
     adults: int
+    bags: int
     price_eur: float
     price_per_person_eur: float
     bucket: str  # "best" | "other" — Googles eigene Vorauswahl
@@ -75,6 +84,7 @@ class Snapshot:
     outbound_date: str
     return_date: str
     adults: int
+    bags: int
     status: str  # "ok" | "no_results" | "error"
     n_offers: int
     price_min_eur: float | None

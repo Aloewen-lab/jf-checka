@@ -32,6 +32,7 @@ OFFER_DTYPES: dict[str, str] = {
     "outbound_date": "string",
     "return_date": "string",
     "adults": "int16",
+    "bags": "int16",
     "price_eur": "float64",
     "price_per_person_eur": "float64",
     "bucket": "string",
@@ -56,6 +57,7 @@ SNAPSHOT_DTYPES: dict[str, str] = {
     "outbound_date": "string",
     "return_date": "string",
     "adults": "int16",
+    "bags": "int16",
     "status": "string",
     "n_offers": "int32",
     "price_min_eur": "float64",
@@ -89,8 +91,11 @@ def _read_dir(directory: pathlib.Path, dtypes: dict[str, str]) -> pd.DataFrame:
     frames = [pd.read_parquet(f) for f in files]
     df = pd.concat(frames, ignore_index=True)
     missing = [c for c in dtypes if c not in df.columns]
-    for col in missing:  # Vorwärtskompatibilität bei späteren Schema-Erweiterungen
-        df[col] = None
+    # Vorwärtskompatibilität: Altbestand vor einer Schema-Erweiterung bekommt
+    # Default-Werte (bags=0 heißt: gemessen ohne Gepäck-Parameter).
+    defaults = {"bags": 0}
+    for col in missing:
+        df[col] = defaults.get(col, pd.NA)
     return df[list(dtypes)].astype(dtypes)
 
 
