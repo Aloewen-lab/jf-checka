@@ -378,6 +378,29 @@ validiert) und der Austausch des Gmail-App-Passworts — auf ausdrückliche
 Entscheidung hin bleibt das bestehende in Betrieb, obwohl es in einem Transkript
 und kurzzeitig in der Git-Historie stand.
 
+### Vorfall 30.07.2026 und Quota-Pacing
+
+Zwei Cron-Läufe crashten beim Zusammenlesen alter (ohne `bags`-Spalte) und
+neuer Parquet-Dateien (`IntCastingNaNError`), NACH der Messung und VOR dem
+Commit — **~56 Calls verbrannt, Daten verloren**. Drei Konsequenzen im Code:
+
+1. `store._read_dir` füllt fehlende Spalten jetzt auch im Mischfall
+   (Regressionstest vorhanden).
+2. Alles nach `write_run` (Report, Alarme) ist gegen Exceptions abgeschirmt,
+   und der Commit-Step im Workflow läuft mit `if: always()` — bezahlte Daten
+   verschwinden nie wieder mit dem Runner.
+3. **Quota-Pacing:** Der Restpool wird über die Tage bis zum Reset gestreckt
+   (`resolve_budget`). Ein Floor garantiert Kern-Paare, Referenz und Audit;
+   Fringe/Split füllen nur auf, was das Pacing hergibt. Mit dem Rest von
+   ~155 Calls bis 30.08. heißt das faktisch: **Kernserie täglich, Fringe
+   pausiert**. Ein Upgrade auf den 25-$-Plan (1.000/Monat) weitet das Budget
+   automatisch — gleiche Logik, größerer Pool.
+
+Außerdem beobachtet: mit gesetztem `bags`-Parameter liefert Google keine
+`price_insights` (weder `price_level` noch Preisgraph). Die Referenzsuche
+läuft deshalb fest mit `bags=0`; den Kern-Messungen fehlt seither Googles
+"typical/low/high"-Einordnung — verschmerzbar, die eigene Zeitreihe ersetzt sie.
+
 **Reihenfolge-Begründung:** Nach M1 fließen bereits Daten, der Preisverlauf beginnt also,
 während M2 gebaut wird. Jeder Tag ohne Collector ist ein Datenpunkt, der nicht nachholbar ist
 (nur grob über Travelpayouts rekonstruierbar).

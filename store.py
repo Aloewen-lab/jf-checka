@@ -90,12 +90,21 @@ def _read_dir(directory: pathlib.Path, dtypes: dict[str, str]) -> pd.DataFrame:
         return _coerce([], dtypes)
     frames = [pd.read_parquet(f) for f in files]
     df = pd.concat(frames, ignore_index=True)
-    missing = [c for c in dtypes if c not in df.columns]
     # Vorwärtskompatibilität: Altbestand vor einer Schema-Erweiterung bekommt
-    # Default-Werte (bags=0 heißt: gemessen ohne Gepäck-Parameter).
+    # Default-Werte (bags=0 heißt: gemessen ohne Gepäck-Parameter). Zwei Fälle:
+    # die Spalte fehlt komplett (nur alte Dateien) ODER sie ist nach dem concat
+    # von alten und neuen Dateien teilweise NaN — genau dieser Mischfall hat am
+    # 30.07.2026 zwei Actions-Läufe crashen lassen (IntCastingNaNError), weil
+    # ein fillna fehlte und NaN nicht in int16 passt.
     defaults = {"bags": 0}
-    for col in missing:
-        df[col] = defaults.get(col, pd.NA)
+    for col, default in defaults.items():
+        if col not in df.columns:
+            df[col] = default
+        else:
+            df[col] = df[col].fillna(default)
+    for col in dtypes:
+        if col not in df.columns:
+            df[col] = pd.NA
     return df[list(dtypes)].astype(dtypes)
 
 

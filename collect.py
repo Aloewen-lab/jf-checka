@@ -48,7 +48,9 @@ def core_pairs(cfg: dict) -> list[tuple[str, str]]:
     return [tuple(p) for p in cfg["dates"]["core"]]
 
 
-def make_request(cfg: dict, pair: tuple[str, str], adults: int) -> SearchRequest:
+def make_request(
+    cfg: dict, pair: tuple[str, str], adults: int, bags: int | None = None
+) -> SearchRequest:
     return SearchRequest(
         origin=cfg["route"]["origin"],
         destination=cfg["route"]["destination"],
@@ -56,7 +58,7 @@ def make_request(cfg: dict, pair: tuple[str, str], adults: int) -> SearchRequest
         return_date=pair[1],
         adults=adults,
         travel_class=cfg["route"].get("travel_class", 1),
-        bags=cfg["route"].get("bags_per_person", 0),
+        bags=cfg["route"].get("bags_per_person", 0) if bags is None else bags,
     )
 
 
@@ -104,7 +106,10 @@ def build_plan(cfg: dict, state: dict, today: date, force: bool) -> dict[str, li
     if ref.get("enabled"):
         plan["reference"] = []
         for pair in ref.get("pairs", []):
-            req = make_request(cfg, tuple(pair), ref.get("adults", 1))
+            # Immer bags=0: mit gesetztem bags-Parameter liefert Google keine
+            # price_insights — und der Preisgraph ist der einzige Zweck dieses
+            # Calls (beobachtet 30.07.2026, wie schon bei adults=5).
+            req = make_request(cfg, tuple(pair), ref.get("adults", 1), bags=0)
             if is_due(state, req.key, ref.get("every_n_days", 7), today, force):
                 plan["reference"].append(req)
 
@@ -130,20 +135,50 @@ class Budget:
         self.used += n
 
 
-def resolve_budget(provider: SerpApiProvider, cfg: dict, max_calls: int | None) -> tuple[int, str]:
+def resolve_budget(
+    provider: SerpApiProvider,
+    cfg: dict,
+    state: dict,
+    today: date,
+    floor: int,
+    max_calls: int | None,
+) -> tuple[int, str]:
+    """Tagesbudget mit Pacing: der Restpool wird über die Tage bis zum Reset
+    gestreckt, statt vorne verbraucht zu werden.
+
+    Ohne Pacing wäre der Pool bei voller Kadenz Mitte des Monats leer und die
+    KERN-Zeitreihe hätte eine Lücke — das schlechteste Ergebnis, das ein
+    Preistracker liefern kann. `floor` garantiert, dass die täglichen Kern-Paare
+    (plus fälliges Audit/Referenz) immer durchpassen; Fringe und Split füllen
+    nur auf, was das Pacing darüber hinaus hergibt. Nach einem Plan-Upgrade
+    weitet sich das Budget automatisch — gleiche Logik, größerer Pool.
+    """
     reserve = cfg["quota"].get("reserve_calls", 0)
-    left = provider.searches_left()
-    if left is None:
-        # Kontostand nicht abrufbar: konservativ auf das Tagesmittel begrenzen.
-        allowed = max(cfg["quota"]["monthly_limit"] // 30, 1)
+    used_today = int((state.get("daily_calls") or {}).get(today.isoformat(), 0))
+
+    info = provider.account_info()
+    if info is None:
+        allowed = max(cfg["quota"]["monthly_limit"] // 30 - used_today, 0)
         note = f"Kontostand nicht abrufbar, konservatives Tagesbudget {allowed}"
     else:
-        allowed = left - reserve
-        note = f"{left} Suchen im Kontingent, {reserve} Reserve -> {max(allowed, 0)} nutzbar"
+        left = info["left"]
+        usable = max(left - reserve, 0)
+        try:
+            days_left = max((date.fromisoformat(info["renewal_date"]) - today).days + 1, 1)
+        except (TypeError, ValueError):
+            days_left = 30
+        pace = usable // days_left
+        day_cap = max(pace, floor)
+        allowed = max(min(usable, day_cap - used_today), 0)
+        note = (
+            f"{left} im Kontingent, {days_left} Tage bis Reset -> Pacing {pace}/Tag, "
+            f"Tagesdeckel {day_cap} (Floor {floor}), heute schon {used_today} "
+            f"verbraucht -> {allowed} nutzbar"
+        )
     if max_calls is not None:
         allowed = min(allowed, max_calls)
         note += f", per --max-calls auf {max_calls} begrenzt"
-    return max(allowed, 0), note
+    return allowed, note
 
 
 def run_batch(
@@ -305,7 +340,14 @@ def main() -> int:
         return 2
 
     provider = SerpApiProvider(api_key)
-    allowed, note = resolve_budget(provider, cfg, args.max_calls)
+    # Floor: was heute auf jeden Fall durchpassen muss, damit die Kernserie
+    # und die wöchentlichen Fixpunkte nie dem Pacing zum Opfer fallen.
+    aud_cfg = cfg.get("baggage_audit") or {}
+    audit_due = aud_cfg.get("enabled") and is_due(
+        state, "baggage_audit", aud_cfg.get("every_n_days", 7), today, args.force_all
+    )
+    floor = len(plan["core"]) + len(plan["reference"]) + (3 if audit_due else 0)
+    allowed, note = resolve_budget(provider, cfg, state, today, floor, args.max_calls)
     budget = Budget(allowed)
     print(f"\n== Budget ==\n  {note}")
     if budget.allowed == 0:
@@ -329,27 +371,26 @@ def main() -> int:
     if triggers:
         batch(triggers, "trigger")
 
-    batch(plan["fringe"], "fringe")
-    batch(plan["split_scheduled"], "split")
-    # Zuletzt, weil es reiner Kontext ist: liefert Googles Preisgraph für einen
-    # nahen Referenztermin auf derselben Route.
+    # Die wöchentlichen Fixpunkte VOR Fringe/Split: an knappen Pacing-Tagen
+    # würden die sonst das Budget wegfressen, das der Floor für Referenz und
+    # Audit reserviert hat.
     batch(plan["reference"], "refhist")
-
-    # Wöchentliches Gepäck-Audit (3 Calls): Buchungsoptionen des Bestangebots.
-    aud_cfg = cfg.get("baggage_audit") or {}
-    if (
-        aud_cfg.get("enabled")
-        and budget.left >= 3
-        and is_due(
-            state, "baggage_audit", aud_cfg.get("every_n_days", 7), today, args.force_all
-        )
-    ):
+    if audit_due and budget.left >= 3:
         used, result = audit.run(cfg, api_key)
         budget.spend(used)
         if result is not None:
             state.setdefault("last_checked", {})["baggage_audit"] = today.isoformat()
 
+    batch(plan["fringe"], "fringe")
+    batch(plan["split_scheduled"], "split")
+
     written = store.write_run(offers, snapshots, history)
+
+    # Tageszähler fürs Pacing: mehrere Läufe pro Tag teilen sich den Deckel.
+    daily = state.setdefault("daily_calls", {})
+    daily[today.isoformat()] = int(daily.get(today.isoformat(), 0)) + budget.used
+    for day in sorted(daily)[:-40]:  # alte Einträge aufräumen
+        del daily[day]
     store.save_state(state)
 
     ok = sum(1 for s in snapshots if s.status == "ok")
@@ -363,7 +404,14 @@ def main() -> int:
         if path:
             print(f"  {kind}: {path.relative_to(ROOT)}")
 
-    report_group_prices(cfg)
+    # Ab hier ist alles nachgelagert: die Messdaten sind geschrieben. Ein Fehler
+    # in Report oder Versand darf den Lauf nicht mehr scheitern lassen — genau
+    # das hat am 30.07.2026 zwei Actions-Läufe samt ihrer Daten gekostet, weil
+    # der Commit-Schritt nach dem Crash nicht mehr lief.
+    try:
+        report_group_prices(cfg)
+    except Exception as exc:
+        print(f"  Report fehlgeschlagen (Daten sind gesichert): {exc}", file=sys.stderr)
 
     if not args.no_alerts:
         print("\n== Alarme ==")
@@ -371,9 +419,9 @@ def main() -> int:
             n = alerts.dispatch(cfg)
             print(f"  {n} Mail(s) verschickt")
         except SmtpConfigError as exc:
-            # Fehlende Mail-Konfiguration darf die Messung nicht verwerfen —
-            # die Daten sind zu diesem Zeitpunkt bereits geschrieben.
             print(f"  Versand übersprungen: {exc}")
+        except Exception as exc:
+            print(f"  Versand fehlgeschlagen: {exc}", file=sys.stderr)
 
     return 0
 

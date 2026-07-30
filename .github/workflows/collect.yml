@@ -73,6 +73,9 @@ jobs:
           python collect.py $ARGS
 
       - name: Neue Messungen committen
+        # always(): auch wenn der Messschritt nach dem Schreiben noch scheitert,
+        # duerfen bereits bezahlte API-Daten nicht mit dem Runner verschwinden.
+        if: always()
         run: |
           git config user.name "jf-checka-bot"
           git config user.email "actions@github.com"

@@ -38,12 +38,22 @@ class SerpApiProvider:
 
     def searches_left(self) -> int | None:
         """Kostenlos — zählt nicht gegen das Kontingent."""
+        info = self.account_info()
+        return info["left"] if info else None
+
+    def account_info(self) -> dict | None:
+        """Restkontingent und Reset-Datum. Kostenlos — zählt nicht gegen das
+        Kontingent. None bei Netz-/API-Fehler."""
         try:
             r = requests.get(
                 ACCOUNT_ENDPOINT, params={"api_key": self._api_key}, timeout=30
             )
             r.raise_for_status()
-            return int(r.json()["total_searches_left"])
+            data = r.json()
+            return {
+                "left": int(data["total_searches_left"]),
+                "renewal_date": data.get("plan_renewal_date"),
+            }
         except Exception:
             return None
 
