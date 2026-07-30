@@ -620,16 +620,19 @@ with tab_table:
     current["Dauer"] = current["duration_out_min"].map(
         lambda m: f"{m // 60}h{m % 60:02d}"
     )
+    # Googles carbon_kg gilt für die GANZE Buchung — pro Person normiert sind
+    # 2er- und 5er-Zeilen vergleichbar. Wert bezieht sich auf den Hinflug.
+    current["co2_pp"] = (current["carbon_kg"] / current["adults"]).round(0)
     view = current[
         ["outbound_date", "return_date", "Nächte", "adults", "price_eur",
          "price_per_person_eur", "airlines", "arrival_airport", "stops_out",
-         "Dauer", "layovers", "carbon_kg", "deep_link"]
+         "Dauer", "layovers", "co2_pp", "deep_link"]
     ].rename(
         columns={
             "outbound_date": "Hinflug", "return_date": "Rückflug", "adults": "Pax",
             "price_eur": "Preis (Buchung)", "price_per_person_eur": "€ p. P.",
             "airlines": "Airlines", "arrival_airport": "Ankunft",
-            "stops_out": "Stopps", "layovers": "Umstiege", "carbon_kg": "CO₂ (kg)",
+            "stops_out": "Stopps", "layovers": "Umstiege", "co2_pp": "CO₂ p. P. (kg)",
             "deep_link": "Google Flights",
         }
     ).sort_values("€ p. P.")
@@ -651,7 +654,9 @@ with tab_table:
         "in der Spalte Pax — eine 2er-Zeile ist also kein Preis für die ganze Gruppe. "
         "Seit 30.07.2026 wird mit 1 aufgegebenem Gepäckstück pro Person gesucht "
         "(`bags=1`); Light-Tarife ohne Koffer werden herausgefiltert oder umbepreist, "
-        "soweit Google die Gebühren kennt. Sitzplatzreservierung nicht enthalten."
+        "soweit Google die Gebühren kennt. Sitzplatzreservierung nicht enthalten. "
+        "CO₂ ist Googles Modellschätzung für den **Hinflug pro Person** (Economy); "
+        "Rundreise ≈ doppelt, typisch für BER→Tokio sind ~660 kg pro Richtung."
     )
 
     aud = audit_mod.latest()
