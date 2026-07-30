@@ -229,7 +229,25 @@ Relevant für den Parser in `providers/serpapi.py`:
 - **Angebotstabelle:** aktuelle Angebote, sortier- und filterbar (max. Stopps, Airline,
   max. Reisedauer, Datum), mit Deep-Link zur Buchung.
 - **Verteilung:** Boxplot der Tagespreise — macht sichtbar, ob *ein* Ausreißer billig ist
-  oder das Niveau insgesamt fällt.
+  oder das Niveau insgesamt fällt. *(noch offen)*
+
+### Umsetzungshinweise (M2, erledigt)
+
+- Alle Kennzahlen rechnen auf `offers`, nicht auf `snapshots` — nur so wirken die Filter
+  ("max. 1 Stopp") konsistent auf KPIs, Verlauf, Heatmap und Tabelle. Die Aggregate liegen
+  in `analytics.py`, damit die Alarmregeln in M3 exakt dieselben Zahlen benutzen und nicht
+  auf einer zweiten Implementierung auseinanderlaufen.
+- Farben aus der validierten Referenzpalette gegen die Oberfläche `#fcfcfb` geprüft
+  (kategoriale Slots 1+2: normal ΔE 33.6, protan 24.7, alle Checks PASS). Das Streamlit-Theme
+  ist deshalb fest auf hell gesetzt — ein automatischer Dark-Flip wäre nicht validiert.
+- Deltas tragen Icon + Wort ("▼ günstiger"), nie Farbe allein: die Statusfarben der Palette
+  liegen im hellen Modus teils unter 3:1 Kontrast.
+- Heatmap-Achsen **müssen** `type="category"` sein. Als Zeitachse interpretiert Plotly die
+  Datums-Strings und verschiebt die Zellen gegen ihre Labels — der Grid zeigte dadurch
+  zunächst den 18.03. statt des 19.03.
+- "Aktuelle Angebote" heißt: jüngste Messung **je Datumspaar und Passagierzahl**. Über den
+  ganzen Tag zu filtern würde mehrere Läufe vermischen und überholte Preise als aktuell
+  ausgeben.
 
 ---
 
