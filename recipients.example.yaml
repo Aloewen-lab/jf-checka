@@ -1,0 +1,25 @@
+# Vorlage. Als recipients.yaml kopieren und ausfüllen — die echte Datei ist
+# gitignoriert, damit keine Adressen im (öffentlichen) Repo landen.
+#
+# In GitHub Actions gibt es diese Datei nicht; dort kommt derselbe Inhalt aus dem
+# Secret JF_RECIPIENTS (als YAML-Text eingefügt).
+#
+# Alle *_eur-Werte sind GRUPPEN-GESAMTPREISE für 5 Personen.
+
+recipients:
+  - email: dein.name@example.com
+    rules:
+      absolute_below_eur: 6500 # ~1.300 EUR p. P.
+      relative_drop_pct: 10 # <= 90 % des 7-Tage-Medians
+      new_all_time_low: true
+    filters:
+      max_stops: 2
+    digest: true
+
+  # - email: person.b@example.com
+  #   rules:
+  #     absolute_below_eur: 6000
+  #   filters:
+  #     max_stops: 1
+  #     max_duration_h: 18
+  #   digest: false

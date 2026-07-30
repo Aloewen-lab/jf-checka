@@ -37,6 +37,19 @@ cp .env.example .env      # Werte eintragen, siehe unten
 | `SMTP_USER` | die absendende Gmail-Adresse |
 | `SMTP_PASS` **oder** `SMTP_PASS_FILE` | Gmail-**App**-Passwort (nicht das Kontopasswort), https://myaccount.google.com/apppasswords, setzt 2FA voraus |
 
+### Empfängerliste
+
+Steht **nicht** in `config.yaml`, weil dieses Repo öffentlich ist und Adressen in
+öffentlichen Repos abgeerntet werden:
+
+```bash
+cp recipients.example.yaml recipients.yaml   # gitignoriert, hier die echten Adressen
+```
+
+In GitHub Actions gibt es diese Datei nicht — dort kommt derselbe YAML-Text aus dem
+Secret `JF_RECIPIENTS`. Ohne beides läuft der Collector weiter, verschickt aber
+keine Mails und warnt im Log.
+
 `SMTP_PASS_FILE` zeigt auf eine Datei, die nur das Passwort enthält — lokal der
 bevorzugte Weg, damit das Geheimnis nicht in `.env` steht. In GitHub Actions gibt
 es diese Datei nicht, dort wird `SMTP_PASS` als Secret gesetzt. Derselbe Code
@@ -84,7 +97,7 @@ Alle Preise in der Config sind **Gruppen-Gesamtpreise** für 5 Personen.
 ## Deployment
 
 **Collector:** `.github/workflows/collect.yml`, Cron 05:00 / 07:00 / 15:00 UTC.
-Repository-Secrets: `SERPAPI_KEY`, `SMTP_USER`, `SMTP_PASS`.
+Repository-Secrets: `SERPAPI_KEY`, `SMTP_USER`, `SMTP_PASS`, `JF_RECIPIENTS`.
 Der Job committet neue Parquet-Dateien selbst zurück und braucht daher
 `permissions: contents: write` (ist gesetzt).
 

@@ -270,6 +270,10 @@ Referenz aus dem Smoke-Test: 7.620 € gesamt = 1.524 € p. P., von Google als
 `price_level: "typical"` eingeordnet (typische Spanne 3.150–5.400 € für 3 Pax,
 also ~1.050–1.800 € p. P.).
 
+Die Liste steht in `recipients.yaml` (gitignoriert) bzw. im Secret `JF_RECIPIENTS`,
+**nicht** in `config.yaml` — das Repo ist öffentlich, und E-Mail-Adressen in
+öffentlichen Repos werden von Scrapern abgeerntet.
+
 ```yaml
 recipients:
   - email: person.a@example.com

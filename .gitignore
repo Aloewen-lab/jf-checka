@@ -3,6 +3,8 @@
 gmail-key.txt
 *-key.txt
 *.secret
+# Empfaengeradressen bleiben aus dem (oeffentlichen) Repo heraus.
+recipients.yaml
 .venv/
 venv/
 __pycache__/

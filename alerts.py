@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ from notify import SmtpConfigError, send
 
 ROOT = pathlib.Path(__file__).resolve().parent
 STATE_FILE = store.BASE / "alert_state.json"
+RECIPIENTS_FILE = ROOT / "recipients.yaml"
 MIN_IMPROVEMENT_EUR = 1.0
 # Ein deutlicher Absturz durchbricht den Cooldown — 12 h zu warten, während der
 # Preis vielleicht schon wieder steigt, wäre der falsche Kompromiss.
@@ -90,6 +92,40 @@ def _de(iso: str) -> str:
 
 
 # --------------------------------------------------------------- Auswertung
+
+
+def load_recipients() -> list[dict]:
+    """Empfängerliste aus recipients.yaml oder dem Secret JF_RECIPIENTS.
+
+    Bewusst nicht in config.yaml: das Repo ist öffentlich, und E-Mail-Adressen in
+    öffentlichen Repos werden abgeerntet. Lokal die Datei, in GitHub Actions das
+    Secret — dieselbe Struktur, zwei Quellen.
+    """
+    raw = os.environ.get("JF_RECIPIENTS", "").strip()
+    source = "JF_RECIPIENTS"
+    if not raw:
+        if not RECIPIENTS_FILE.exists():
+            print(
+                "  WARNUNG: keine Empfänger gefunden. recipients.yaml anlegen "
+                "(Vorlage: recipients.example.yaml) oder JF_RECIPIENTS setzen.",
+                file=sys.stderr,
+            )
+            return []
+        raw = RECIPIENTS_FILE.read_text()
+        source = str(RECIPIENTS_FILE.name)
+
+    data = yaml.safe_load(raw)
+    entries = data if isinstance(data, list) else (data or {}).get("recipients") or []
+    if not entries:
+        print(f"  WARNUNG: {source} enthält keine Empfänger.", file=sys.stderr)
+    return entries
+
+
+def resolve(cfg: dict) -> dict:
+    """Config mit der extern gehaltenen Empfängerliste zusammenführen."""
+    if not cfg.get("recipients"):
+        cfg["recipients"] = load_recipients()
+    return cfg
 
 
 def _window(cfg: dict, offers: pd.DataFrame) -> pd.DataFrame:
@@ -283,6 +319,7 @@ def render(alert: Alert, cfg: dict) -> tuple[str, str]:
 
 
 def dispatch(cfg: dict, dry_run: bool = False) -> int:
+    cfg = resolve(cfg)
     offers = store.read_offers()
     if offers.empty:
         print("Keine Angebotsdaten — nichts zu prüfen.")
@@ -416,6 +453,7 @@ def maybe_send_digest(
 
 def send_test(cfg: dict) -> int:
     """Testmail an alle Empfänger — prüft SMTP-Zugang und Formatierung."""
+    cfg = resolve(cfg)
     offers = _window(cfg, store.read_offers())
     group_df = analytics.group_prices(
         analytics.per_config_daily_min(offers),
@@ -467,6 +505,7 @@ def main() -> int:
             print(f"\n{n} Testmail(s) verschickt.")
             return 0
         if args.digest:
+            cfg = resolve(cfg)
             offers = _window(cfg, store.read_offers())
             state = load_state()
             n = maybe_send_digest(

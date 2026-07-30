@@ -63,6 +63,9 @@ jobs:
           SMTP_PORT: "587"
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          # Empfaengerliste als YAML-Text im Secret — steht bewusst nicht in
+          # config.yaml, weil dieses Repo oeffentlich ist.
+          JF_RECIPIENTS: ${{ secrets.JF_RECIPIENTS }}
         run: |
           ARGS=""
           if [ "${{ inputs.force_all }}" = "true" ]; then ARGS="$ARGS --force-all"; fi

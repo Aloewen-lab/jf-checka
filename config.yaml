@@ -67,20 +67,7 @@ alerts:
   cooldown_hours: 12
   digest_hour_local: 8 # Tages-Digest um 08:00 Europe/Berlin
 
-recipients:
-  - email: person.a@example.com
-    rules:
-      absolute_below_eur: 6500 # ~1.300 EUR p. P.
-      relative_drop_pct: 10 # <= 90 % des 7-Tage-Medians
-      new_all_time_low: true
-    filters:
-      max_stops: 2
-    digest: true
-  # Weitere Empfänger nach dem gleichen Muster ergänzen.
-  # - email: person.b@example.com
-  #   rules:
-  #     absolute_below_eur: 6000
-  #   filters:
-  #     max_stops: 1
-  #     max_duration_h: 18
-  #   digest: false
+# Die Empfängerliste steht NICHT hier, sondern in recipients.yaml (gitignoriert)
+# bzw. im Secret JF_RECIPIENTS. Grund: dieses Repo ist öffentlich, und
+# E-Mail-Adressen in öffentlichen Repos werden von Scrapern abgeerntet.
+# Vorlage: recipients.example.yaml
