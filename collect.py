@@ -23,8 +23,10 @@ from datetime import date, datetime, timezone
 import yaml
 from dotenv import load_dotenv
 
+import alerts
 import store
 from models import Offer, PricePoint, SearchRequest, Snapshot
+from notify import SmtpConfigError
 from providers import SerpApiProvider
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -276,6 +278,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="Plan zeigen, nichts abrufen")
     ap.add_argument("--force-all", action="store_true", help="Kadenz ignorieren")
     ap.add_argument("--max-calls", type=int, default=None, help="Budget begrenzen")
+    ap.add_argument("--no-alerts", action="store_true", help="keine Mails versenden")
     args = ap.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -345,6 +348,17 @@ def main() -> int:
             print(f"  {kind}: {path.relative_to(ROOT)}")
 
     report_group_prices(cfg)
+
+    if not args.no_alerts:
+        print("\n== Alarme ==")
+        try:
+            n = alerts.dispatch(cfg)
+            print(f"  {n} Mail(s) verschickt")
+        except SmtpConfigError as exc:
+            # Fehlende Mail-Konfiguration darf die Messung nicht verwerfen —
+            # die Daten sind zu diesem Zeitpunkt bereits geschrieben.
+            print(f"  Versand übersprungen: {exc}")
+
     return 0
 
 

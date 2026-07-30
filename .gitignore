@@ -1,4 +1,8 @@
 .env
+# Die Schluesseldatei liegt im Projektordner — auf keinen Fall committen.
+gmail-key.txt
+*-key.txt
+*.secret
 .venv/
 venv/
 __pycache__/
