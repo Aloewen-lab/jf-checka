@@ -1,0 +1,101 @@
+name: collect
+
+# 3x taeglich. Cron ist UTC: 05:00 UTC = 07:00 Berlin (Sommerzeit) bzw. 06:00 (Winter).
+# Der 05:00-Lauf liegt damit vor digest_hour_local (08:00) — den Digest schickt
+# erst der 07:00-UTC-Lauf. Das ist beabsichtigt: so enthaelt die Tagesuebersicht
+# schon die Messung des Morgens.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+    - cron: "0 7 * * *"
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: "Kadenz ignorieren (alle Datumspaare messen)"
+        type: boolean
+        default: false
+      max_calls:
+        description: "Call-Budget fuer diesen Lauf begrenzen (leer = automatisch)"
+        type: string
+        default: ""
+
+# Zwei gleichzeitige Laeufe wuerden sich beim Zurueckcommitten in die Quere
+# kommen und doppelt Quota verbrauchen.
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Secrets pruefen
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+        run: |
+          if [ -z "$SERPAPI_KEY" ]; then
+            echo "::error::SERPAPI_KEY fehlt in den Repository-Secrets."
+            exit 1
+          fi
+
+      - name: Messen und Alarme versenden
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          # In der Cloud gibt es keine gmail-key.txt — hier kommt das Passwort
+          # aus dem Secret. mailer.py bevorzugt SMTP_PASS und faellt lokal auf
+          # SMTP_PASS_FILE zurueck, derselbe Code deckt beide Umgebungen ab.
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: "587"
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.force_all }}" = "true" ]; then ARGS="$ARGS --force-all"; fi
+          if [ -n "${{ inputs.max_calls }}" ]; then ARGS="$ARGS --max-calls ${{ inputs.max_calls }}"; fi
+          python collect.py $ARGS
+
+      - name: Neue Messungen committen
+        run: |
+          git config user.name "jf-checka-bot"
+          git config user.email "actions@github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "Keine neuen Daten — nichts zu committen."
+            exit 0
+          fi
+          git commit -m "data: Messung $(date -u +'%Y-%m-%d %H:%M') UTC"
+          # Ein paralleler Lauf oder ein manueller Push koennte inzwischen
+          # vorausgelaufen sein; rebasen statt fehlschlagen.
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Quota-Stand im Job-Summary
+        if: always()
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os, requests
+          try:
+              r = requests.get("https://serpapi.com/account",
+                               params={"api_key": os.environ["SERPAPI_KEY"]}, timeout=30).json()
+              print(f"**SerpApi-Quota:** {r['total_searches_left']} von "
+                    f"{r['searches_per_month']} Suchen frei, Reset {r['plan_renewal_date']}")
+          except Exception as exc:
+              print(f"Quota-Abfrage fehlgeschlagen: {exc}")
+          PY

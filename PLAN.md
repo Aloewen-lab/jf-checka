@@ -334,6 +334,22 @@ Kosten 0 €, kein Server, unabhängig davon ob der Mac läuft.
 | **M4** | GitHub-Actions-Workflow, Streamlit-Cloud-Deploy | 0,5 T |
 | **M5** | Härtung: Retries, Provider-Fallback, Quota-Guard, Tests | 0,5 T |
 
+### Stand 30.07.2026
+
+| | Status |
+|---|---|
+| M0 Setup, Smoke-Test | erledigt |
+| M1 Collector, Parquet-Store, Quota-Guard | erledigt |
+| M2 Dashboard | erledigt (Boxplot der Verteilung offen) |
+| M3 Alarme, Digest, Dedup | erledigt, SMTP-Login verifiziert; **Testmail noch nicht verschickt** |
+| M4 Actions-Workflow | Workflow geschrieben und validiert; **Push, Secrets und Streamlit-Deploy offen** |
+| M5 Härtung | Retries, Provider-Abstraktion und Quota-Guard stehen; automatisierte Tests fehlen |
+
+Bewusst offen gelassen: Dark Mode (Palette ist nur gegen die helle Oberfläche
+validiert) und der Austausch des Gmail-App-Passworts — auf ausdrückliche
+Entscheidung hin bleibt das bestehende in Betrieb, obwohl es in einem Transkript
+und kurzzeitig in der Git-Historie stand.
+
 **Reihenfolge-Begründung:** Nach M1 fließen bereits Daten, der Preisverlauf beginnt also,
 während M2 gebaut wird. Jeder Tag ohne Collector ist ein Datenpunkt, der nicht nachholbar ist
 (nur grob über Travelpayouts rekonstruierbar).

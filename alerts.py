@@ -21,6 +21,7 @@ import pathlib
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yaml
@@ -89,6 +90,18 @@ def _de(iso: str) -> str:
 
 
 # --------------------------------------------------------------- Auswertung
+
+
+def _window(cfg: dict, offers: pd.DataFrame) -> pd.DataFrame:
+    """Nur die konfigurierten Ostern-Termine. Der Referenztermin aus
+    `reference_history` liegt in 2026 und ist kein Alarmgegenstand."""
+    if offers.empty:
+        return offers
+    win_out = set(cfg["dates"]["outbound"])
+    win_in = set(cfg["dates"]["inbound"])
+    return offers[
+        offers["outbound_date"].isin(win_out) & offers["return_date"].isin(win_in)
+    ]
 
 
 def recipient_filters(rec: dict) -> Filters:
@@ -275,23 +288,19 @@ def dispatch(cfg: dict, dry_run: bool = False) -> int:
         print("Keine Angebotsdaten — nichts zu prüfen.")
         return 0
 
-    # Referenztermine (siehe reference_history) sind kein Alarmgegenstand.
-    win_out = set(cfg["dates"]["outbound"])
-    win_in = set(cfg["dates"]["inbound"])
-    offers = offers[
-        offers["outbound_date"].isin(win_out) & offers["return_date"].isin(win_in)
-    ]
-
+    offers = _window(cfg, offers)
     state = load_state()
     now = datetime.now(timezone.utc)
     cooldown = int((cfg.get("alerts") or {}).get("cooldown_hours", 12))
 
+    sent = maybe_send_digest(cfg, offers, state, now)
+
     candidates = evaluate(cfg, offers)
     if not candidates:
         print("Keine Regel ausgelöst.")
-        return 0
+        save_state(state)
+        return sent
 
-    sent = 0
     for alert in candidates:
         if not should_send(alert, state, cooldown, now):
             print(f"  übersprungen (Dedup/Cooldown): {alert.recipient} {alert.pair}")
@@ -322,13 +331,92 @@ def dispatch(cfg: dict, dry_run: bool = False) -> int:
     return sent
 
 
+def maybe_send_digest(
+    cfg: dict, offers: pd.DataFrame, state: dict, now: datetime, force: bool = False
+) -> int:
+    """Tages-Digest an Empfänger mit `digest: true`.
+
+    Wichtig, weil E-Mail der einzige Kanal ist: ohne ein tägliches Lebenszeichen
+    ist ein stiller Collector-Ausfall von "Preis unverändert" nicht zu
+    unterscheiden — man würde schlicht nie wieder etwas hören und es für gute
+    Nachrichten halten.
+    """
+    conf = cfg.get("alerts") or {}
+    local = now.astimezone(ZoneInfo("Europe/Berlin"))
+    today_local = local.date().isoformat()
+    if not force and local.hour < int(conf.get("digest_hour_local", 8)):
+        return 0
+
+    group_df = analytics.group_prices(
+        analytics.per_config_daily_min(offers),
+        primary=cfg["passenger_configs"]["primary"],
+        split=tuple(cfg["passenger_configs"]["split"]),
+    )
+    daily = analytics.daily_best(group_df)
+    if daily.empty:
+        return 0
+    k = analytics.kpis(daily)
+    latest_day = group_df["day"].max()
+    top = group_df[group_df["day"] == latest_day].nsmallest(3, "group_price")
+    health = analytics.data_health(store.read_snapshots())
+    min_saving = float(cfg.get("split_min_saving_eur", 0))
+    group_size = cfg["group_size"]
+
+    lines = [
+        f"Stand {today_local} · BER → Tokio · {group_size} Personen",
+        "",
+        f"Günstigster Gruppenpreis: {_eur(k.current)}"
+        f"  ({_eur(k.current / group_size)} p. P.)",
+        f"Termin: {k.current_pair} · {k.current_source}",
+    ]
+    if k.delta_prev_day is not None:
+        lines.append(f"Gegenüber Vortag: {k.delta_prev_day:+,.0f} €".replace(",", "."))
+    lines += [
+        f"Allzeit-Tief: {_eur(k.all_time_low)} am {k.all_time_low_day}",
+        f"Tage bis Abflug: {k.days_to_departure} · Historie: {k.n_days_tracked} Tag(e)",
+        "",
+        "Beste Termine heute:",
+    ]
+    for _, r in top.iterrows():
+        note = ""
+        saving = r["split_saving"]
+        if pd.notna(saving) and saving >= min_saving:
+            note = f"  (getrennt buchen spart {_eur(float(saving))})"
+        lines.append(
+            f"  {r['outbound_date']} → {r['return_date']}  {int(r['nights'])}N  "
+            f"{_eur(float(r['group_price']))}{note}"
+        )
+    lines += [
+        "",
+        f"Datenlage: {health['n_ok']} erfolgreiche Messungen, "
+        f"{health['n_failed']} Fehler · letzte {health['last_run']} UTC",
+        "",
+        "Diese Mail kommt täglich, auch ohne Preisänderung — bleibt sie aus,",
+        "läuft der Collector nicht mehr.",
+    ]
+    plain = "\n".join(lines)
+
+    sent = 0
+    for rec in cfg.get("recipients") or []:
+        if not rec.get("digest"):
+            continue
+        email = rec["email"]
+        if not force and state["digests"].get(email) == today_local:
+            continue
+        try:
+            send(email, f"[JF-Checka] Tagesübersicht {today_local}", plain)
+        except Exception as exc:
+            print(f"  FEHLER Digest an {email}: {exc}", file=sys.stderr)
+            continue
+        state["digests"][email] = today_local
+        sent += 1
+        print(f"  Digest an {email} verschickt")
+    return sent
+
+
 def send_test(cfg: dict) -> int:
     """Testmail an alle Empfänger — prüft SMTP-Zugang und Formatierung."""
-    offers = store.read_offers()
-    win_out, win_in = set(cfg["dates"]["outbound"]), set(cfg["dates"]["inbound"])
-    offers = offers[
-        offers["outbound_date"].isin(win_out) & offers["return_date"].isin(win_in)
-    ]
+    offers = _window(cfg, store.read_offers())
     group_df = analytics.group_prices(
         analytics.per_config_daily_min(offers),
         primary=cfg["passenger_configs"]["primary"],
@@ -365,6 +453,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="JF-Checka Alarme")
     ap.add_argument("--test", action="store_true", help="Testmail verschicken")
     ap.add_argument("--dry-run", action="store_true", help="nur zeigen, nicht senden")
+    ap.add_argument(
+        "--digest", action="store_true", help="Digest sofort senden, ohne Uhrzeitprüfung"
+    )
     args = ap.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -374,6 +465,15 @@ def main() -> int:
         if args.test:
             n = send_test(cfg)
             print(f"\n{n} Testmail(s) verschickt.")
+            return 0
+        if args.digest:
+            offers = _window(cfg, store.read_offers())
+            state = load_state()
+            n = maybe_send_digest(
+                cfg, offers, state, datetime.now(timezone.utc), force=True
+            )
+            save_state(state)
+            print(f"\n{n} Digest(s) verschickt.")
             return 0
         n = dispatch(cfg, dry_run=args.dry_run)
         print(f"\n{n} Alarm(e) verschickt.")
