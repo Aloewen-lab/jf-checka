@@ -1,0 +1,32 @@
+{
+  "ts_utc": "2026-08-06T07:37:05+00:00",
+  "pair": {
+    "outbound": "2027-03-22",
+    "return": "2027-04-02"
+  },
+  "adults": 5,
+  "bags_requested": 1,
+  "itinerary": {
+    "airlines": "Austrian, EVA Air",
+    "price_search": 7416,
+    "price_booking": 7416
+  },
+  "booking_options": [
+    {
+      "book_with": "Expedia",
+      "price": 11024,
+      "baggage": [
+        "1 free carry-on"
+      ]
+    },
+    {
+      "book_with": "martiGO",
+      "price": 7416,
+      "baggage": [
+        "1 free carry-on",
+        "2 free checked bags"
+      ]
+    }
+  ],
+  "api_calls": 3
+}

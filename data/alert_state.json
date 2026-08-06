@@ -1,6 +1,11 @@
 {
-  "alerts": {},
+  "alerts": {
+    "alexander.loewen.media@gmail.com|2027-03-19 \u2192 2027-04-03": {
+      "price": 6780.0,
+      "ts": "2026-08-06T07:37:05+00:00"
+    }
+  },
   "digests": {
-    "alexander.loewen.media@gmail.com": "2026-08-05"
+    "alexander.loewen.media@gmail.com": "2026-08-06"
   }
 }
